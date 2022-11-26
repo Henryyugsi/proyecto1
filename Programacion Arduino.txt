@@ -1,0 +1,119 @@
+#include <DHT.h>
+#include <UIPEthernet.h>
+#include <SPI.h>
+#include <PubSubClient.h>
+#define DHTPIN 3
+#define DHTTYPE DHT11
+DHT dht(DHTPIN, DHTTYPE);
+const int lightSensorPin = A1;
+const int MQ_PIN = A0;
+int RL_VALUE = 1;
+float ADV;
+int READ_SAMPLE_INTERVAL = 50;
+int READ_SAMPLE_TIMES = 5;
+float MQRead(int mq_pin){
+int i;
+float rs=0;
+for(i=0;i<READ_SAMPLE_TIMES;i++){
+rs+= MQResistanceCalculation(analogRead(mq_pin));
+delay(READ_SAMPLE_INTERVAL);
+}
+rs = rs/READ_SAMPLE_TIMES;
+return rs;
+}
+float MQResistanceCalculation(int raw_adc){
+ADV = (5.0*analogRead(MQ_PIN))/1023.0;
+return (((float)RL_VALUE*(5-ADV)/ADV));
+}
+float R0=20;
+// **** ETHERNET SETTING ****
+byte mac[] = { 0x54, 0x34, 0x41, 0x30, 0x30, 0x31 };                                       
+IPAddress ip(192, 168, 10, 100);                        
+EthernetServer server(80);
+//Configuracion de mqtt server
+IPAddress mqtt_server{192,168,10,1};
+EthernetClient clientEthernet;
+PubSubClient mqttClient;
+void setup() {
+  Serial.begin(9600);
+  dht.begin();
+  Ethernet.begin(mac, ip);
+  server.begin();
+  Serial.print("IP Address: ");
+  Serial.println(Ethernet.localIP());
+  mqttClient.setClient(clientEthernet);
+  mqttClient.setServer(mqtt_server,1883);
+}
+void loop() {
+  Serial.print("Humedad: ");
+  Serial.println(MedidorHumedad());
+  Serial.print("Temperatura: ");
+  Serial.println(MedidorTemperatura());
+  Serial.println(MedidorLuminosidad());
+long iPPM_CO2;
+long iPPM_NH3;
+iPPM_CO2=MQGetPercentageCO2(MQRead(MQ_PIN)/R0);
+iPPM_NH3=MQGetPercentageNH3(MQRead(MQ_PIN)/R0);
+Serial.println("---------------------------------------");
+Serial.print("CO2: ");
+Serial.println(iPPM_CO2);
+Serial.print("NH3: ");
+Serial.println(iPPM_NH3);
+EthernetClient client = server.available();
+long me1=MedidorHumedad();
+long me2=MedidorTemperatura();
+long me3=MedidorLuminosidad();
+String str1="%";
+String str2="/";
+str1.concat(me2);
+str1.concat(str2);
+str1.concat(me1);
+str1.concat(str2);
+str1.concat(iPPM_CO2);
+str1.concat(str2);
+str1.concat(iPPM_NH3);
+str1.concat(str2);
+str1.concat(me3);
+str1.concat("%");
+char b[40];
+str1.toCharArray(b,40);
+char mensaje[40];
+for(int i=0;i<40;i++){
+  mensaje[i]= str1[i];  
+}
+  if(mqttClient.connect("Uno")) {
+    mqttClient.publish("datos",mensaje);
+  }
+}
+
+float MedidorLuminosidad(){
+  int lightSensorReading = 0;
+  lightSensorReading = analogRead(lightSensorPin);
+return lightSensorReading;
+}
+
+float MedidorTemperatura(){
+  float t = dht.readTemperature();
+  if (isnan(t) ) {
+    t=0.0;    
+    return;
+  }
+return t;
+}
+
+float MedidorHumedad(){
+  float h = dht.readHumidity();
+  if (isnan(h) ) {
+    h=0.0;   
+    return;
+  }
+return h;
+}
+long MQGetPercentageCO2(float rs_ro_ratio){ 
+  float exp=-2.914;
+return (114.99)*pow(rs_ro_ratio,exp);
+}
+long MQGetPercentageNH3(float rs_ro_ratio){ 
+  float exp=-2.488;
+return (102.87)*pow(rs_ro_ratio,exp);
+}
